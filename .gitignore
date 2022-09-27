@@ -1,2 +1,4 @@
 config_secret.h
 .DS_Store
+.vscode/
+.pio/

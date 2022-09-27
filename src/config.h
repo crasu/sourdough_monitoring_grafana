@@ -1,6 +1,17 @@
+#pragma once
 
-#define WIFI_SSID     "wifi_name" // Add wifi name
-#define WIFI_PASSWORD "wifi_password" // Add wifi passowrd
+#if __has_include("config_secret.h")
+    #include "config_secret.h"
+#endif
+
+/*
+Add and set these values in config_secret.h
+
+#define WIFI_SSID     "ssid" // Add wifi name
+#define WIFI_PASSWORD "key" // Add wifi passowrd
+#define GC_PROM_USER "username"
+#define GC_PROM_PASS "cloud secret"
+*/
 
 #define ID "sourdough" // Add unique name for this sensor
 #define INTERVAL 5 //seconds
@@ -12,7 +23,5 @@
 #define ULTRASONIC_PIN_ECHO 5 // Which pin is HC-SR04's echo connected to
 
 #define GC_PORT 443
-#define GC_PROM_URL "prometheus-us-central1.grafana.net"
+#define GC_PROM_URL "prometheus-prod-13-prod-us-east-0.grafana.net"
 #define GC_PROM_PATH "/api/prom/push"
-#define GC_PROM_USER ""
-#define GC_PROM_PASS ""
