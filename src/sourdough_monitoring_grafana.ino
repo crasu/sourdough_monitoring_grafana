@@ -1,138 +1,205 @@
 #include <Arduino.h>
-#include <PromLokiTransport.h>
-#include <PrometheusArduino.h>
-#include <DHT.h>
 #include <HCSR04.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <ArduinoJson.h>
+#include <ESPmDNS.h>
+#include <time.h>
+#include <LittleFS.h>
+#include <CircularBuffer.h>
 
 #include "certificates.h"
 #include "config.h"
+#include "Index.h"
+
+int loopCounter = 0;
+
+struct Measurement {
+  time_t time;
+  float temperature;
+  float humidity;
+  float height;
+};
+
+typedef StaticJsonDocument<1024> MeasurementJsonType;
+typedef CircularBuffer<Measurement, MEASUREMENTS_PER_HOUR*24*7> QuatarlyMeasurementType;
 
 // DHT Sensor
-DHT dht(DHTPIN, DHTTYPE);
+//DHT dht(DHTPIN, DHTTYPE);
 
 // Ultrasonic Sensor
 UltraSonicDistanceSensor distanceSensor(ULTRASONIC_PIN_TRIG, ULTRASONIC_PIN_ECHO);  
 
-// Prometheus client and transport
-PromLokiTransport transport;
-PromClient client(transport);
+WebServer httpServer(80);
 
-// Create a write request for 4 series
-WriteRequest req(4, 2048);
+Measurement currentMeassurement {0, NAN, NAN, NAN};
+QuatarlyMeasurementType quartalyMeassurement;
 
-// Define a TimeSeries which can hold up to 5 samples
-TimeSeries ts1(5, "temperature_celsius", "{monitoring_type=\"sourdough\",board_type=\"esp32_devkit1\",sourdough_type=\"rye\"}");
-TimeSeries ts2(5, "humidity_percent", "{monitoring_type=\"sourdough\",board_type=\"esp32_devkit1\",sourdough_type=\"rye\"}");
-TimeSeries ts3(5, "heat_index_celsius", "{monitoring_type=\"sourdough\",board_type=\"esp32_devkit1\",sourdough_type=\"rye\"}");
-TimeSeries ts4(5, "height_centimeter", "{monitoring_type=\"sourdough\",board_type=\"esp32_devkit1\",sourdough_type=\"rye\"}");
+time_t epochInQuarters(time_t epoch) {
+  return epoch / (60*(60/MEASUREMENTS_PER_HOUR));
+}
 
-int loopCounter = 0;
+void addMeasurement(Measurement& newM) {
+  Measurement m = quartalyMeassurement.last();
 
-// Function to set up Prometheus client
-void setupClient() {
-  Serial.println("Setting up client...");
-
-  uint8_t serialTimeout;
-  while (!Serial && serialTimeout < 50) {
-    delay(100);
-    serialTimeout++;
+  if(epochInQuarters(m.time) != epochInQuarters(newM.time)) {
+    Serial.println("Saving measurement with timestamp " + String(newM.time));
+    quartalyMeassurement.push(newM);
+  } else {
+    Serial.println("Not saving measurement");
   }
-  
-  // Configure and start the transport layer
-  transport.setUseTls(true);
-  transport.setCerts(grafanaCert, strlen(grafanaCert));
-  transport.setWifiSsid(WIFI_SSID);
-  transport.setWifiPass(WIFI_PASSWORD);
-  transport.setDebug(Serial);  // Remove this line to disable debug logging of the client.
-  if (!transport.begin()) {
-      Serial.println(transport.errmsg);
-      while (true) {};
-  }
-
-  // Configure the client
-  client.setUrl(GC_PROM_URL);
-  client.setPath(GC_PROM_PATH);
-  client.setPort(GC_PORT);
-  client.setUser(GC_PROM_USER);
-  client.setPass(GC_PROM_PASS);
-  client.setDebug(Serial);  // Remove this line to disable debug logging of the client.
-  if (!client.begin()) {
-      Serial.println(client.errmsg);
-      while (true) {};
-  }
-
-  // Add our TimeSeries to the WriteRequest
-  req.addTimeSeries(ts1);
-  req.addTimeSeries(ts2);
-  req.addTimeSeries(ts3);
-  req.addTimeSeries(ts4);
-  req.setDebug(Serial);  // Remove this line to disable debug logging of the write request serialization and compression.
 }
 
 // Get height of starter
 float getHeight() {
-  float height_from_bottom = 16.50;
-  float height = height_from_bottom - distanceSensor.measureDistanceCm();
-  if (height > 0) {
-    return height;
-  };
-  return 0;
+  float dist=NAN;
+  float ret=0;
+
+  for(int retry=0; retry <= 3; retry++) {
+    #ifdef EMULATE_SENSOR
+    dist=rand() % 20;
+    #else
+    dist=distanceSensor.measureDistanceCm()
+    #endif
+
+    float height_from_bottom = 16.50;
+    float height = height_from_bottom - dist;
+
+    if (height == -1) {
+      ret=NAN;
+    }
+
+    if (height > 0) {
+      ret=height;
+      return height;
+    };
+
+    ret=0;
+  }
+
+  return ret;
 }
 
-// ========== MAIN FUNCTIONS: SETUP & LOOP ========== 
-// SETUP: Function called at boot to initialize the system
+void setupWifi() {
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.println("Connecting to WiFi..");
+  }
+ 
+  Serial.println("Connected to the WiFi network");
+}
+
+void sendMainPage(void)
+{
+    httpServer.send(200, "text/html", MAIN_PAGE);
+}
+
+bool isValidMeasurement(Measurement& m) {
+  return not(m.time == 0 || isnan(m.temperature || isnan(m.humidity) || isnan(m.height)));
+}
+
+MeasurementJsonType createDoc(Measurement& m) {
+  MeasurementJsonType doc;
+
+  doc[F("time")] = m.time;
+  doc[F("temperature")] = m.temperature;
+  doc[F("humidity")] = m.humidity;
+  doc[F("height")] = m.height;
+
+  return doc;
+}
+
+void sendCurrentStats(void)
+{
+    MeasurementJsonType doc;
+    String buffer;
+
+    if(!isValidMeasurement(currentMeassurement)) {
+      httpServer.send(503, F("application/json"), F("{}"));
+    }
+
+    doc = createDoc(currentMeassurement);
+
+    serializeJson(doc, buffer); 
+    httpServer.send(200, F("application/json"), buffer);
+}
+
+MeasurementJsonType createQuartalyDoc(QuatarlyMeasurementType& quartalyMeassurement) {
+  MeasurementJsonType doc;
+
+  for(int i=0; i<quartalyMeassurement.size(); i++) {
+    auto m = quartalyMeassurement[i];
+    doc.add(createDoc(m));
+  }
+  return doc;
+}
+
+void sendWeekStats(void) 
+{
+    MeasurementJsonType doc;
+    String buffer;
+
+    if(!isValidMeasurement(currentMeassurement)) {
+      httpServer.send(503, F("application/json"), F("{}"));
+    }
+
+    doc = createQuartalyDoc(quartalyMeassurement);
+
+    serializeJson(doc, buffer); 
+    httpServer.send(200, F("application/json"), buffer);
+}
+
+void setupWebserver() {
+  httpServer.on("/stats/week", sendWeekStats);
+  //httpServer.on("/stats/day", sendYearStats);
+  httpServer.on("/stats/current", sendCurrentStats);
+  httpServer.on("/", sendMainPage);
+  httpServer.begin();
+}
+
 void setup() {
   Serial.begin(115200);
-  setupClient();
-  dht.begin();
+  setupWifi();
+  configTime(0, 0, "pool.ntp.org");
+  MDNS.begin(ID);
+  LittleFS.begin(true);
+  setupWebserver();
+  //dht.begin();
 }
 
-// LOOP: Function called in a loop to read from sensors and send them do databases
+time_t getTime() {
+  time_t t;
+  time(&t);
+
+  return t;
+}
+
 void loop() {
-  int64_t time;
-  time = transport.getTimeMillis();
+  time_t time=getTime();
+  static time_t lastUpdate=0;
 
-  float hum = dht.readHumidity();
-  float cels = dht.readTemperature();
-  float height = getHeight();
+  if((time-lastUpdate)>=INTERVAL) {
+    lastUpdate=time;
 
-  // Check if any reads failed and exit early (to try again).
-  if (isnan(hum) || isnan(cels) || isnan(height) ) {
-    Serial.println(F("Failed to read from sensor!"));
-    return;
+    /*float hum = dht.readHumidity();
+    float cels = dht.readTemperature();*/
+    float height = getHeight();
+
+    // Check if any reads failed and exit early (to try again).
+    if (isnan(height) ) {
+      Serial.println(F("Failed to read from sensor!"));
+    } else {
+      currentMeassurement = Measurement{getTime(), 20, 0.4, height};
+      addMeasurement(currentMeassurement);
+
+      Serial.println("Measured " + String(height) + " cm");
+    }
   }
 
-  int hic = dht.computeHeatIndex(cels, hum, false);
-
-  if (loopCounter >= 5) {
-    //Send
-    loopCounter = 0;
-    PromClient::SendResult res = client.send(req);
-    if (!res == PromClient::SendResult::SUCCESS) {
-      Serial.println(client.errmsg);
-    }
-    // Reset batches after a succesful send.
-    ts1.resetSamples();
-    ts2.resetSamples();
-    ts3.resetSamples();
-    ts4.resetSamples();
-  } else {
-    if (!ts1.addSample(time, cels)) {
-      Serial.println(ts1.errmsg);
-    }
-    if (!ts2.addSample(time, hum)) {
-      Serial.println(ts2.errmsg);
-    }
-    if (!ts3.addSample(time, hic)) {
-      Serial.println(ts3.errmsg);
-    }
-    if (!ts4.addSample(time, height)) {
-      Serial.println(ts4.errmsg);
-    }
-    loopCounter++;
-  }
-
-  // wait INTERVAL seconds and then do it again
-  delay(INTERVAL * 1000);
+  httpServer.handleClient();
+  
+  delay(50);
 }
 
