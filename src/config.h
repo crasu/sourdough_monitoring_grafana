@@ -14,4 +14,4 @@
 #define ULTRASONIC_PIN_TRIG 4 // Which pin is HC-SR04's trig connected txo
 #define ULTRASONIC_PIN_ECHO 5 // Which pin is HC-SR04's echo connected to
 
-#define EMULATE_SENSOR 1
+//#define EMULATE_SENSOR 1

@@ -55,28 +55,30 @@ void addMeasurement(Measurement& newM) {
 // Get height of starter
 float getHeight() {
   float dist=NAN;
-  float ret=0;
+  float ret=NAN;
 
   for(int retry=0; retry <= 3; retry++) {
     #ifdef EMULATE_SENSOR
-    dist=rand() % 20;
+    dist=rand() % 20 - 1;
     #else
-    dist=distanceSensor.measureDistanceCm()
+    dist=distanceSensor.measureDistanceCm();
     #endif
 
     float height_from_bottom = 16.50;
-    float height = height_from_bottom - dist;
 
-    if (height == -1) {
-      ret=NAN;
+    if (dist == -1) {
+      // Distance could not be measured try again
+      continue;
     }
 
-    if (height > 0) {
-      ret=height;
-      return height;
-    };
+    float height = height_from_bottom - dist;
 
-    ret=0;
+    if (height > 0) {
+      ret = height;
+      break;
+    } else {
+      ret = 0; // Distance below zero set to bottom of jar
+    };
   }
 
   return ret;
