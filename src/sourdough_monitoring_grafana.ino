@@ -45,6 +45,8 @@ void addMeasurement(Measurement& newM) {
   if(epochInQuarters(m.time) != epochInQuarters(newM.time)) {
     Serial.println("Saving measurement with timestamp " + String(newM.time));
     quartalyMeassurement.push(newM);
+    
+    saveCircularBufferFromFile();
   } else {
     Serial.println("Not saving measurement");
   }
@@ -136,6 +138,36 @@ MeasurementJsonType createQuartalyDoc(QuatarlyMeasurementType& quartalyMeassurem
   return doc;
 }
 
+#define WEEKQUATERS_FILENAME "/weekquaters"
+
+void saveCircularBufferFromFile() {
+  File f = LittleFS.open(WEEKQUATERS_FILENAME, FILE_WRITE);
+  if (!f) {
+    Serial.printf(PSTR("Open failed for file %s\n"), WEEKQUATERS_FILENAME);
+    ESP.restart();
+  }
+  f.write((uint8_t*)&quartalyMeassurement, sizeof(QuatarlyMeasurementType));
+
+  f.close();
+  Serial.printf(PSTR("Data stored to file: %s\n"), WEEKQUATERS_FILENAME);
+}
+
+void loadCircularBufferFromFile() {
+  File f = LittleFS.open(WEEKQUATERS_FILENAME, FILE_READ);
+  if (!f) {
+    Serial.printf(PSTR("Open failed for file %s"), WEEKQUATERS_FILENAME);
+    return;
+  }
+  f.read((uint8_t*)&quartalyMeassurement, sizeof(QuatarlyMeasurementType));
+
+  f.close();
+  Serial.printf(PSTR("Data read from file: %s\n"), WEEKQUATERS_FILENAME);
+}
+
+bool clearCircularBufferFile() {
+  return LittleFS.remove(WEEKQUATERS_FILENAME);
+}
+
 void sendWeekStats(void) 
 {
     MeasurementJsonType doc;
@@ -151,9 +183,19 @@ void sendWeekStats(void)
     httpServer.send(200, F("application/json"), buffer);
 }
 
+void clearWeekStats(void) 
+{
+    if(clearCircularBufferFile()) {
+        httpServer.send(200, F("application/json"), F("{ \"message\": \"stats deleted\"}"));
+    } else {
+        httpServer.send(409, F("application/json"), F("{ \"message\": \"stats could not be deleted\"}"));
+    }
+    
+}
+
 void setupWebserver() {
   httpServer.on("/stats/week", sendWeekStats);
-  //httpServer.on("/stats/day", sendYearStats);
+  httpServer.on("/stats/clear", clearWeekStats);
   httpServer.on("/stats/current", sendCurrentStats);
   httpServer.on("/", sendMainPage);
   httpServer.begin();
@@ -165,6 +207,7 @@ void setup() {
   configTime(0, 0, "pool.ntp.org");
   MDNS.begin(ID);
   LittleFS.begin(true);
+  loadCircularBufferFromFile();
   setupWebserver();
   //dht.begin();
 }
