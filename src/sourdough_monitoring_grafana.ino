@@ -12,7 +12,7 @@
 #include "config.h"
 #include "Index.h"
 
-int loopCounter = 0;
+SET_LOOP_TASK_STACK_SIZE(16*1024);
 
 struct Measurement {
   time_t time;
@@ -21,7 +21,7 @@ struct Measurement {
   float height;
 };
 
-typedef StaticJsonDocument<1024> MeasurementJsonType;
+typedef StaticJsonDocument<4096> MeasurementJsonType;
 typedef CircularBuffer<Measurement, MEASUREMENTS_PER_HOUR*24*7> QuatarlyMeasurementType;
 
 // DHT Sensor
@@ -106,11 +106,15 @@ MeasurementJsonType createDoc(Measurement& m) {
   MeasurementJsonType doc;
 
   doc[F("time")] = m.time;
-  doc[F("temperature")] = m.temperature;
-  doc[F("humidity")] = m.humidity;
-  doc[F("height")] = m.height;
+  doc[F("temperature")] = round2(m.temperature);
+  doc[F("humidity")] = round2(m.humidity);
+  doc[F("height")] = round2(m.height);
 
   return doc;
+}
+
+double round2(double value) {
+   return (int)(value * 100 + 0.5) / 100.0;
 }
 
 void sendCurrentStats(void)
