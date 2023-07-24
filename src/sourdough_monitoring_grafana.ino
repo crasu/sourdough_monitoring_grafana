@@ -42,7 +42,7 @@ time_t epochInQuarters(time_t epoch) {
 void addMeasurement(Measurement& newM) {
   Measurement m = quartalyMeassurement.last();
 
-  if(epochInQuarters(m.time) != epochInQuarters(newM.time)) {
+  if(epochInQuarters(m.time) != epochInQuarters(newM.time) && isValidMeasurement(newM)) {
     Serial.println("Saving measurement with timestamp " + String(newM.time));
     quartalyMeassurement.push(newM);
     
@@ -133,7 +133,9 @@ MeasurementJsonType createQuartalyDoc(QuatarlyMeasurementType& quartalyMeassurem
 
   for(int i=0; i<quartalyMeassurement.size(); i++) {
     auto m = quartalyMeassurement[i];
-    doc.add(createDoc(m));
+    if(isValidMeasurement(m)) {
+      doc.add(createDoc(m));
+    }
   }
   return doc;
 }
@@ -186,9 +188,10 @@ void sendWeekStats(void)
 void clearWeekStats(void) 
 {
     if(clearCircularBufferFile()) {
-        httpServer.send(200, F("application/json"), F("{ \"message\": \"stats deleted\"}"));
+      quartalyMeassurement.clear();
+      httpServer.send(200, F("application/json"), F("{ \"message\": \"stats deleted\"}"));
     } else {
-        httpServer.send(409, F("application/json"), F("{ \"message\": \"stats could not be deleted\"}"));
+      httpServer.send(409, F("application/json"), F("{ \"message\": \"stats could not be deleted\"}"));
     }
     
 }
