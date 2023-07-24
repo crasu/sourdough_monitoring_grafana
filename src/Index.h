@@ -143,7 +143,7 @@ const char MAIN_PAGE[] PROGMEM = R"=====(
         for(obj of parsedJson) {
             var d = new Date(0); 
             d.setUTCSeconds(obj["time"]);
-            var datestr = dateFns.format(d, "HH:MM:ss");
+            var datestr = dateFns.format(d, "HH:mm:ss");
             labels.push(datestr);
         }
 
@@ -163,7 +163,7 @@ const char MAIN_PAGE[] PROGMEM = R"=====(
         }
 
         return [{
-            label: "My First dataset",
+            label: "Current Sourdough data",
             data: data,
             backgroundColor: color, 
         }];
