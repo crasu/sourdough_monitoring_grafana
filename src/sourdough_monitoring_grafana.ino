@@ -85,12 +85,12 @@ float getHeight() {
 void setupWifi() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
+  Serial.println("Connecting to WiFi..");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.println("Connecting to WiFi..");
+    Serial.print(".");
   }
- 
-  Serial.println("Connected to the WiFi network");
+  Serial.println("\nConnected to the WiFi network");
 }
 
 void sendMainPage(void)
