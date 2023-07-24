@@ -21,7 +21,7 @@ struct Measurement {
   float height;
 };
 
-typedef StaticJsonDocument<4096> MeasurementJsonType;
+typedef StaticJsonDocument<1024> MeasurementJsonType;
 typedef CircularBuffer<Measurement, MEASUREMENTS_PER_HOUR*24*7> QuatarlyMeasurementType;
 
 // DHT Sensor
@@ -134,16 +134,29 @@ void sendCurrentStats(void)
     httpServer.send(200, F("application/json"), buffer);
 }
 
-MeasurementJsonType createQuartalyDoc(QuatarlyMeasurementType& quartalyMeassurement) {
+String createQuartalyDoc(QuatarlyMeasurementType& quartalyMeassurement) {
   MeasurementJsonType doc;
+
+  String buffer = "[";
+  String jsonBuffer;
+  bool first = true;
 
   for(int i=0; i<quartalyMeassurement.size(); i++) {
     auto m = quartalyMeassurement[i];
     if(isValidMeasurement(m)) {
-      doc.add(createDoc(m));
+        doc = createDoc(m);
+        if (first) {
+          first=false;
+        } else {
+          buffer += ",";
+        }
+        serializeJson(doc, buffer);
     }
   }
-  return doc;
+
+  buffer+="]";
+
+  return buffer;
 }
 
 #define WEEKQUATERS_FILENAME "/weekquaters"
@@ -178,16 +191,10 @@ bool clearCircularBufferFile() {
 
 void sendWeekStats(void) 
 {
-    MeasurementJsonType doc;
     String buffer;
 
-    if(!isValidMeasurement(currentMeassurement)) {
-      httpServer.send(503, F("application/json"), F("{}"));
-    }
+    buffer = createQuartalyDoc(quartalyMeassurement);
 
-    doc = createQuartalyDoc(quartalyMeassurement);
-
-    serializeJson(doc, buffer); 
     httpServer.send(200, F("application/json"), buffer);
 }
 
