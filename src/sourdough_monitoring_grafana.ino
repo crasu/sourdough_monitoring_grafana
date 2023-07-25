@@ -84,13 +84,35 @@ float getHeight() {
   return ret;
 }
 
+void reconnectWifi() {
+  const u_int64_t DELAY = 20000;
+  static u_int64_t previous_time = 0;
+  u_int64_t current_time = millis(); // number of milliseconds since the upload
+
+  // checking for WIFI connection
+  if ((WiFi.status() != WL_CONNECTED) && (current_time - previous_time >= 20000)) {
+    Serial.print(millis());
+    Serial.println("Reconnecting to WIFI network");
+    WiFi.disconnect();
+    WiFi.reconnect();
+    previous_time = current_time;
+  }
+}
+
 void setupWifi() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  int loopCount=0;
 
   Serial.println("Connecting to WiFi..");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
+    loopCount++;
+    if(loopCount > 60) {
+      Serial.print("Wifi connection timeout. Restarting esp!");
+      WiFi.disconnect();
+      ESP.restart();
+    }
   }
   Serial.println("\nConnected to the WiFi network");
 }
@@ -258,6 +280,8 @@ void loop() {
   }
 
   httpServer.handleClient();
+
+  reconnectWifi();
   
   delay(50);
 }
