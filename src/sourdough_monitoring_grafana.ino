@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include <HCSR04.h>
+#include "vl53l4cd_class.h"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ArduinoJson.h>
@@ -26,9 +26,8 @@ typedef CircularBuffer<Measurement, MEASUREMENTS_PER_HOUR*24*7> QuatarlyMeasurem
 
 // DHT Sensor
 //DHT dht(DHTPIN, DHTTYPE);
-
-// Ultrasonic Sensor
-UltraSonicDistanceSensor distanceSensor(ULTRASONIC_PIN_TRIG, ULTRASONIC_PIN_ECHO);  
+#define DEV_I2C Wire
+VL53L4CD sensor_vl53l4cd_sat(&DEV_I2C, 2);
 
 WebServer httpServer(80);
 
@@ -54,34 +53,25 @@ void addMeasurement(Measurement& newM) {
 
 // Get height of starter
 float getHeight() {
-  float dist=NAN;
-  float ret=NAN;
+  float dist=0;
 
-  for(int retry=0; retry <= 3; retry++) {
-    #ifdef EMULATE_SENSOR
-    dist=rand() % 20 - 1;
-    #else
-    dist=distanceSensor.measureDistanceCm();
-    #endif
+  #ifdef EMULATE_SENSOR
+  dist=rand() % 20 - 1;
+  #else
+  dist=getRange();
+  #endif
 
-    float height_from_bottom = 16.50;
+  if(dist == NAN)
+    return NAN;
 
-    if (dist == -1) {
-      // Distance could not be measured try again
-      continue;
-    }
+  float height_from_bottom = 16.50;
+  float height = height_from_bottom - dist;
 
-    float height = height_from_bottom - dist;
-
-    if (height > 0) {
-      ret = height;
-      break;
-    } else {
-      ret = 0; // Distance below zero set to bottom of jar
-    };
-  }
-
-  return ret;
+  if (height > 0) {
+    return height;
+  } else {
+    return 0; // Distance below zero set to bottom of jar
+  };
 }
 
 void reconnectWifi() {
@@ -97,6 +87,50 @@ void reconnectWifi() {
     WiFi.reconnect();
     previous_time = current_time;
   }
+}
+
+void setupRangeSensor() {
+  Serial.println("Adafruit VL53L4CD");
+  // Initialize I2C bus.
+  DEV_I2C.begin();
+
+  // Configure VL53L4CD satellite component.
+  sensor_vl53l4cd_sat.begin();
+
+  // Switch off VL53L4CD satellite component.
+  sensor_vl53l4cd_sat.VL53L4CD_Off();
+
+  //Initialize VL53L4CD satellite component.
+  sensor_vl53l4cd_sat.InitSensor();
+
+  // Program the highest possible TimingBudget, without enabling the
+  // low power mode. This should give the best accuracy
+  sensor_vl53l4cd_sat.VL53L4CD_SetRangeTiming(200, 0);
+
+  // Start Measurements
+  sensor_vl53l4cd_sat.VL53L4CD_StartRanging();
+}
+
+float getRange() {
+  uint8_t NewDataReady = 0;
+  VL53L4CD_Result_t results;
+  uint8_t status;
+
+  do {
+    status = sensor_vl53l4cd_sat.VL53L4CD_CheckForDataReady(&NewDataReady);
+  } while (!NewDataReady);
+
+  if ((status == 0) && (NewDataReady != 0)) {
+    // (Mandatory) Clear HW interrupt to restart measurements
+    sensor_vl53l4cd_sat.VL53L4CD_ClearInterrupt();
+
+    // Read measured distance. RangeStatus = 0 means valid data
+    sensor_vl53l4cd_sat.VL53L4CD_GetResult(&results);
+    Serial.printf("Raw measurement %u mm\n", results.distance_mm);
+    return results.distance_mm/10.0;
+  }
+
+  return NAN;
 }
 
 void setupWifi() {
@@ -246,6 +280,7 @@ void setup() {
   MDNS.begin(ID);
   LittleFS.begin(true);
   loadCircularBufferFromFile();
+  setupRangeSensor();
   setupWebserver();
   //dht.begin();
 }
